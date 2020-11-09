@@ -13,7 +13,7 @@ import(
 
 )
 
-type HandlerFunc func(conn net.Conn)
+type HandlerFunc func(req *Request)
 
 type Server struct{
 	addr     string
@@ -101,7 +101,7 @@ func (s *Server) handle(conn net.Conn) {
 
 	  req.Headers = mp
 
-	  req.Body=data[headersLineEnd+4:]
+	  req.Body=data[headersLineEnd +4:]
   
 	  reqLine := string(data[:requestLineEnd])
 	  parts := strings.Split(reqLine, " ")
@@ -133,18 +133,70 @@ func (s *Server) handle(conn net.Conn) {
 	  
 	  req.Conn = conn
 	  req.QueryParams = uri.Query()
+
   
-	  var handler = func(conn net.Conn) {
-		conn.Close()
+	  var handler = func(req *Request) {
+		req.Conn.Close()
 	  }
 	  s.mu.RLock()
-	  for i := 0; i < len(s.handlers); i++ {
-		if hdlr, found := s.handlers[path]; found {
-		  handler = hdlr
-		  break
-		}
+
+	  pathParam, hr:=s.checkPath(uri.Path)
+	  if hr!=nil {
+		req.PathParams = pathParam
+		handler = hr
 	  }
 	  s.mu.RUnlock()
-	  handler(conn) 
+	  handler(&req) 
 	} 
 }
+
+func (s *Server) checkPath(path string) (map[string]string, HandlerFunc) {
+
+	strRoutes := make([]string, len(s.handlers))
+	i := 0
+	for k := range s.handlers {
+	  strRoutes[i] = k
+	  i++
+	}
+  
+	mp := make(map[string]string)
+    
+	for i := 0; i < len(strRoutes); i++ {
+	  flag := false
+	  route := strRoutes[i]
+	  partsRoute := strings.Split(route, "/")
+	  pRotes := strings.Split(path, "/")
+      
+	  for j, v := range partsRoute {
+		if v != "" {
+		  f := v[0:1]
+		  l := v[len(v)-1:]
+		  if f == "{" && l == "}" {
+			mp[v[1:len(v)-1]] = pRotes[j]
+			flag = true
+		  } else if pRotes[j] != v {
+  
+			strs := strings.Split(v, "{")
+			if len(strs) > 0 {
+			  key := strs[1][:len(strs[1])-1]
+			  mp[key] = pRotes[j][len(strs[0]):]
+			  flag = true
+			} else {
+			  flag = false
+			  break
+			}
+		  }
+		  flag = true
+		}
+	  }
+	  if flag {
+		if hr, found := s.handlers[route]; found {
+		  return mp, hr
+		}
+		break
+	  }
+	}
+  
+	return nil, nil
+  
+  }
