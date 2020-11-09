@@ -8,6 +8,7 @@ import(
 	"io"
 	"bytes"
 	"strings"
+	"net/url"
 
 
 )
@@ -18,6 +19,13 @@ type Server struct{
 	addr     string
 	mu       sync.RWMutex
 	handlers   map[string]HandlerFunc
+}
+type Request struct {
+	Conn        net.Conn
+	QueryParams url.Values
+	PathParams  map[string]string
+	Headers     map[string]string
+	Body        []byte
 }
 
 func NewServer(addr string) *Server {
@@ -66,6 +74,7 @@ func (s *Server) handle(conn net.Conn) {
 		log.Println(err)
 		return
 	  }
+	  var req Request
   
 	  data := buf[:n]
 	  requestLineDelim := []byte{'\r', '\n'}
@@ -74,6 +83,25 @@ func (s *Server) handle(conn net.Conn) {
 		log.Println("ErrBadRequest")
 		return
 	  }
+
+	  headersLineDelim:=[]byte{'\r', '\n', '\r', '\n'}
+	  headersLineEnd := bytes.Index(data, headersLineDelim)
+	  if requestLineEnd == -1 {
+		return
+	  }
+
+	  headersLine := string(data[requestLineEnd:headersLineEnd])
+	  headers := strings.Split(headersLine, "\r\n")[1:]
+
+	  mp := make(map[string]string)
+	  for _, v := range headers {
+		headerLine := strings.Split(v, ": ")
+		mp[headerLine[0]] = headerLine[1]
+	  }
+
+	  req.Headers = mp
+
+	  req.Body=data[headersLineEnd+4:]
   
 	  reqLine := string(data[:requestLineEnd])
 	  parts := strings.Split(reqLine, " ")
@@ -89,6 +117,22 @@ func (s *Server) handle(conn net.Conn) {
 		log.Println("ErrHTTPVersionNotValid")
 		return
 	  }
+
+	  decoded, err:=url.PathUnescape(path)
+	  if err!=nil {
+		  log.Println(err)
+		  return
+	  }
+	  log.Println(decoded)
+
+	  uri, err:=url.ParseRequestURI(decoded)
+	  if err!=nil {
+		log.Println(err)
+		return
+	  }
+	  
+	  req.Conn = conn
+	  req.QueryParams = uri.Query()
   
 	  var handler = func(conn net.Conn) {
 		conn.Close()
